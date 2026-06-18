@@ -1,0 +1,37 @@
+{
+  "rules": {
+    "rooms": {
+      "$roomId": {
+        ".read": "auth != null",
+        ".write": "auth != null && !data.exists()",
+
+        "meta": {
+          ".write": "auth != null && (!data.exists() || data.child('hostUid').val() === auth.uid)",
+          "lastActivity": { ".write": "auth != null" },
+          "revealRequest": { ".write": "auth != null" }
+        },
+
+        "participants": {
+          "$uid": {
+            ".write": "auth != null && (auth.uid === $uid || root.child('rooms/' + $roomId + '/meta/hostUid').val() === auth.uid)"
+          }
+        },
+
+        "rounds": {
+          ".write": "auth != null && root.child('rooms/' + $roomId + '/meta/hostUid').val() === auth.uid",
+          "$roundId": {
+            "status": { ".write": "auth != null" },
+            "voted": {
+              "$uid": { ".write": "auth != null && auth.uid === $uid" }
+            },
+            "votes": {
+              "$uid": {
+                ".write": "auth != null && auth.uid === $uid && $roundId === root.child('rooms/' + $roomId + '/meta/currentRoundId').val() && root.child('rooms/' + $roomId + '/meta/deckSet').child(newData.val()).val() === true"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

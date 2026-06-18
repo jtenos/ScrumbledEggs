@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> **Status: greenfield.** Only `LICENSE` exists today — no application code has been scaffolded yet. Sections marked _(planned)_ describe intended design, not code that exists. Update them to reflect reality as the codebase grows, and remove this banner once the app is scaffolded.
+> **Status: scaffolded & implemented.** The Vite + vanilla-TS app exists under `src/`, assets live under `public/`, Firebase config is in `firebase.json` / `database.rules.json`, and the scheduled cleanup is in `functions/`. See [README.md](README.md) for setup. Sections once marked _(planned)_ now describe live code — keep them in sync as the code changes. Known gap: server-side vote-read privacy (see Security Rules note and README).
 
 ## Project Overview
 
@@ -33,7 +33,13 @@ Core flow:
 
 The app is a single-page client that mirrors a room's state from RTDB. There is no request/response API; instead the UI **subscribes** to paths in RTDB and re-renders on change, and **writes** local actions (vote, join, reveal) straight to RTDB. Treat RTDB as the single source of truth.
 
-Because there's no UI framework, establish a deliberate render pattern early (e.g. small render functions each bound to an RTDB listener that update a specific DOM subtree) so update logic doesn't sprawl into ad-hoc DOM manipulation.
+Because there's no UI framework, the render pattern is small element-builder functions (`src/util/dom.ts` `el()`/`mount()`) composed per screen. `src/ui/room.ts` subscribes once to the room and re-renders a `content` container on each snapshot; transient UI (open share panel, mid-edit name) may reset on remote updates — an accepted tradeoff of full re-render.
+
+**Source map** (the non-obvious wiring):
+- `src/db/rooms.ts` — the only module that touches RTDB; all reads/writes go through it.
+- `src/scoring.ts` — pure scoring (mean/median/recommended/spread/consensus + the numeric mapping). `src/scales.ts` — presets, deck assembly, preset-link query parse/build. Both pure → first place for tests.
+- `src/ui/room.ts` — orchestrator: join gate, reveal flow + 3s veto timer, auto-reveal, modal triggers, host tools. `src/ui/board.ts` — responsive participant layout + vote sizing. `src/ui/results.ts`, `join.ts`, `modals.ts`, `expired.ts`, `home.ts` — focused screens/pieces.
+- `src/auth.ts` — anonymous sign-in; `uid` is the participant identity. `src/router.ts` — hash routing (`#/room/<id>`) + preset query on home.
 
 ### Data model (proposed RTDB shape)
 
@@ -56,29 +62,30 @@ Rounds are append-only and ordered by creation (RTDB push keys). Only the round 
 
 All runtime-referenced static files belong in Vite's **`public/`** directory, which Vite copies verbatim into the build (`dist/`) with **unchanged filenames**, served at root-relative URLs. This is required because these assets are referenced by **runtime-constructed paths** (random logo number, manifest-driven icon filenames, the fetched `.txt`); importing them through the bundler instead would hash their filenames and break those lookups.
 
-Current layout at the **repo root** (no Vite app exists yet):
+Layout under Vite's **`public/`** directory (served verbatim at the site root → `/favicon.ico`, `/player-images.txt`, `/img/logo/logo-1.webp`, etc.):
 ```
-favicon.ico
-player-images.txt       # manifest of player-icon filenames
-img/
-  egg.webp              # vote-card background
-  celebrate.gif         # consensus celebration
-  spread.gif            # vote-spread alert
-  waiting.gif           # "waiting on you" nudge
-  eggspired.webp        # expired-room page image
-  logo/                 # logo-1.webp … logo-6.webp (600×600)
-  player-icons/         # *.webp (300×300)
+public/
+  favicon.ico
+  player-images.txt       # manifest of player-icon filenames
+  img/
+    egg.webp              # vote-card background
+    celebrate.gif         # consensus celebration
+    spread.gif            # vote-spread alert
+    waiting.gif           # "waiting on you" nudge
+    eggspired.webp        # expired-room page image
+    logo/                 # logo-1.webp … logo-6.webp (600×600)
+    player-icons/         # *.webp (300×300)
 ```
 
-During scaffolding, move this whole set under Vite's `public/` directory (i.e. `public/favicon.ico`, `public/player-images.txt`, `public/img/...`), preserving the structure so the served URLs become `/favicon.ico`, `/player-images.txt`, `/img/logo/logo-1.webp`, etc. Note: `firebase.json`'s `"public"` field points at the build output (`dist/`), which is a different thing from Vite's source `public/` folder despite the shared name.
+Note: `firebase.json`'s `"public"` field points at the build output (`dist/`), which is a different thing from Vite's source `public/` folder despite the shared name.
 
 ### Player avatar icons
 
-Avatar images live in `img/player-icons/` as **300×300 WebP** files. Because the app is fully client-side with no server, the filesystem can't be enumerated at runtime — so the list of available icons is read from **`player-images.txt`** (one filename per line), which the client fetches to know which icons exist.
+Avatar images live in `public/img/player-icons/` as **300×300 WebP** files. Because the app is fully client-side with no server, the filesystem can't be enumerated at runtime — so the list of available icons is read from **`public/player-images.txt`** (one filename per line), which the client fetches (`src/util/icons.ts`) to know which icons exist.
 
-**This manifest must be kept in sync by hand:** whenever icons are added to or removed from `img/player-icons/`, update `player-images.txt` to match. Regenerate it with (prefix paths with `public/` once assets have moved under `public/`):
+**This manifest must be kept in sync by hand:** whenever icons are added to or removed from `public/img/player-icons/`, update `public/player-images.txt` to match. Regenerate it with:
 ```bash
-ls -1 img/player-icons/*.webp | xargs -n1 basename > player-images.txt
+ls -1 public/img/player-icons/*.webp | xargs -n1 basename > public/player-images.txt
 ```
 
 ### Two architectural concerns that need deliberate handling
@@ -125,26 +132,27 @@ Implementation:
 3. Deploy a Cloud Function subscribed to that topic that calls the Cloud Billing API to **disable billing on the project** once spend crosses the cap (Google's documented "cap (disable) billing" pattern). Disabling billing halts Blaze services — for this app that's the desired fail-safe.
 4. Optionally also set **per-API quota limits** (e.g. on Cloud Functions invocations and RTDB egress) to throttle the blast radius before the cap even triggers.
 
-## Commands (planned — valid once the Vite app is scaffolded)
+## Commands
 
 ```bash
 npm install          # install deps
-npm run dev          # local dev server with HMR
-npm run build        # production build to dist/
+npm run dev          # local dev server with HMR (http://localhost:5173)
+npm run build        # type-check (tsc) + production build to dist/
 npm run preview      # serve the production build locally
-npm run lint         # ESLint
-npm test             # Vitest (recommended test runner for Vite)
-npm test -- <path>   # run a single test file
-npm test -- -t "name"  # run a single test by name
+npm run typecheck    # tsc --noEmit — the quality gate (no ESLint configured yet)
 ```
+
+There is no test runner configured yet; `npm run typecheck` is the gate. The scoring logic
+(`src/scoring.ts`) and scales (`src/scales.ts`) are pure and the natural first place to add
+Vitest tests.
 
 Firebase:
 ```bash
-firebase emulators:start   # local RTDB + Auth + Hosting emulators
-firebase deploy            # deploy hosting + database rules
+firebase emulators:start                 # local RTDB + Auth + Hosting + Functions emulators
+firebase deploy                          # hosting + database rules + functions
+firebase deploy --only database          # rules only
+firebase deploy --only functions         # cleanup function only
 ```
-
-> These reflect Vite/Firebase defaults. Confirm exact script names against `package.json` once it exists.
 
 ## Features
 
