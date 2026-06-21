@@ -1,6 +1,7 @@
 // Shared top bar: random logo + app title + light/dark toggle.
 import { el } from '../util/dom';
 import { randomLogoUrl, toggleTheme } from '../theme';
+import { homeUrl } from '../router';
 
 export function header(): HTMLElement {
   const logo = el('img', { class: 'logo', src: randomLogoUrl(), alt: 'Scrumbled Eggs logo' });
@@ -18,7 +19,10 @@ export function header(): HTMLElement {
   });
 
   return el('div', { class: 'topbar' }, [
-    el('div', { class: 'brand' }, [logo, el('h1', { text: 'Scrumbled Eggs' })]),
+    el('a', { class: 'brand', href: homeUrl(), title: 'Back to home' }, [
+      logo,
+      el('h1', { text: 'Scrumbled Eggs' }),
+    ]),
     themeBtn,
   ]);
 }
